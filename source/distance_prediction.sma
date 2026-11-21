@@ -107,6 +107,16 @@ new g_PredMethod[33] = { 1, ... }
 new Float:g_ExpPath[33]        // horizontal path flown since takeoff
 new Float:g_ExpLastPos[33][3]
 new Float:g_ExpTakeoffTime[33]
+// per-frame history of this jump (frame 0 = takeoff) and the strafe switches, for the 2-strafe window
+#define EXP_MAX_FRAMES 128
+#define EXP_MAX_STRAFES 64
+new g_ExpFrames[33]
+new Float:g_ExpX[33][EXP_MAX_FRAMES], Float:g_ExpY[33][EXP_MAX_FRAMES]
+new Float:g_ExpVX[33][EXP_MAX_FRAMES], Float:g_ExpVY[33][EXP_MAX_FRAMES]
+new Float:g_ExpTime[33][EXP_MAX_FRAMES]
+new g_ExpSide[33]                      // side key of the current strafe: 1 = A, -1 = D, 0 = none yet
+new g_ExpStarts[33][EXP_MAX_STRAFES]   // frame where each strafe started
+new g_ExpStrafes[33]
 new const g_PredMethodNames[2][] = { "Predicted", "Expected" }
 
 stock ExpectedReset(id, const Float:start[3])
@@ -116,11 +126,33 @@ stock ExpectedReset(id, const Float:start[3])
     g_ExpLastPos[id][1] = start[1]
     g_ExpLastPos[id][2] = start[2]
     g_ExpTakeoffTime[id] = get_gametime()
+    g_ExpFrames[id] = 0
+    g_ExpSide[id] = 0
+    g_ExpStrafes[id] = 0
 }
 
-// Adds this frame's horizontal step to the path flown (skips teleports).
-stock ExpectedTrack(id, const Float:origin[3])
+// Adds this frame's horizontal step to the path flown (skips teleports), stores the frame and
+// starts a new strafe when the side key changes (A only = left, D only = right).
+stock ExpectedTrack(id, const Float:origin[3], const Float:velocity[3], keys)
 {
+    new f = g_ExpFrames[id]
+    if (f < EXP_MAX_FRAMES)
+    {
+        g_ExpX[id][f] = origin[0]
+        g_ExpY[id][f] = origin[1]
+        g_ExpVX[id][f] = velocity[0]
+        g_ExpVY[id][f] = velocity[1]
+        g_ExpTime[id][f] = get_gametime()
+        g_ExpFrames[id] = f + 1
+        new side = 0
+        if ((keys & IN_MOVELEFT) && !(keys & IN_MOVERIGHT)) side = 1
+        else if ((keys & IN_MOVERIGHT) && !(keys & IN_MOVELEFT)) side = -1
+        if (f > 0 && side != 0 && side != g_ExpSide[id] && g_ExpStrafes[id] < EXP_MAX_STRAFES)
+        {
+            g_ExpStarts[id][g_ExpStrafes[id]++] = f
+            g_ExpSide[id] = side
+        }
+    }
     new Float:dx = origin[0] - g_ExpLastPos[id][0]
     new Float:dy = origin[1] - g_ExpLastPos[id][1]
     new Float:step = floatsqroot(dx*dx + dy*dy)
@@ -131,7 +163,7 @@ stock ExpectedTrack(id, const Float:origin[3])
     g_ExpLastPos[id][2] = origin[2]
 }
 
-// Expected distance. Window = the whole jump so far:
+// Expected distance. Window = the whole jump so far (until two strafes are finished, see below):
 //   a   = straight distance from takeoff now,  s = horizontal speed now,  s0 = takeoff speed
 //   c   = (s^2 - s0^2) / air time   (speed^2 gained per second)
 //   eta = a / path flown            (how straight the jump has been)
@@ -155,6 +187,40 @@ stock Float:ExpectedDistance(id, const Float:origin[3], const Float:velocity[3],
         c = (s*s - s0*s0) / air
         if (g_ExpPath[id] > 1.0)
             eta = floatmin(a / g_ExpPath[id], 1.0)
+    }
+    // Two finished strafes or more: use the last two finished strafes (from the start of strafe
+    // j-2 to the start of the current strafe j) instead of the whole jump.
+    //   gain: c = (s1^2 - s0^2) / (t1 - t0) over that window, and the speed is taken on that
+    //         even-gain line, s^2 = s1^2 + c (now - t1), not the current (peaking) speed
+    //   eta : thL, thR = largest left / right angle between the velocity and the window's chord;
+    //         eta = mean cos of a sweep from -thR to +thL = (sin thL + sin thR) / (thL + thR)
+    new n = g_ExpStrafes[id]
+    if (n >= 3)
+    {
+        new w0 = g_ExpStarts[id][n - 3]
+        new w1 = g_ExpStarts[id][n - 1]
+        new Float:dt01 = g_ExpTime[id][w1] - g_ExpTime[id][w0]
+        new Float:cx = g_ExpX[id][w1] - g_ExpX[id][w0]
+        new Float:cy = g_ExpY[id][w1] - g_ExpY[id][w0]
+        new Float:cl = floatsqroot(cx*cx + cy*cy)
+        if (dt01 > 0.0005 && cl > 1.0)
+        {
+            new Float:s0w = g_ExpVX[id][w0]*g_ExpVX[id][w0] + g_ExpVY[id][w0]*g_ExpVY[id][w0]
+            new Float:s1w = g_ExpVX[id][w1]*g_ExpVX[id][w1] + g_ExpVY[id][w1]*g_ExpVY[id][w1]
+            c = (s1w - s0w) / dt01
+            s = floatsqroot(floatmax(s1w + c * (get_gametime() - g_ExpTime[id][w1]), 1.0))
+            new Float:thL = 0.000001, Float:thR = 0.000001
+            for (new m = w0 + 1; m <= w1; m++)
+            {
+                new Float:vx = g_ExpVX[id][m], Float:vy = g_ExpVY[id][m]
+                new Float:vl = floatsqroot(vx*vx + vy*vy)
+                if (vl < 1.0) continue
+                new Float:th = floatasin(floatclamp((cx*vy - cy*vx) / (cl*vl), -1.0, 1.0), radian)
+                if (th > thL) thL = th
+                if (-th > thR) thR = -th
+            }
+            eta = floatmin((floatsin(thL, radian) + floatsin(thR, radian)) / (thL + thR), 1.0)
+        }
     }
     if (T < 0.0) T = 0.0
 
@@ -2117,7 +2183,11 @@ public fw_PlayerPreThink(id)
             g_LDJFirstFrameUsed[id] = true;
         }
         // Expected: replaces the shown value; the landing box moves along the line from takeoff
-        ExpectedTrack(id, currOrigin)
+        new Float:trackVel[3]
+        trackVel[0] = horiz_vel_x
+        trackVel[1] = horiz_vel_y
+        trackVel[2] = 0.0
+        ExpectedTrack(id, currOrigin, trackVel, pev(id, pev_oldbuttons))
         if (UseExpected(id))
         {
             new Float:expVel[3]

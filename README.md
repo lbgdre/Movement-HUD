@@ -76,5 +76,6 @@ The original prediction ("Predicted") assumes you stop strafing right now and fl
 
 - **Gain rate** `c = (s² − s0²) / air time`, where `s0` is the takeoff speed and `s` the current horizontal speed.
 - **Efficiency** `η = a / path`: the straight distance from takeoff divided by the path actually flown.
+- Once two strafes are finished, both come from the last two finished strafes instead: `c` is their speed² gain rate (with the speed taken on that steady-gain line), and `η = (sin θL + sin θR) / (θL + θR)`, where `θL`, `θR` are the largest left and right angles between the velocity and the straight line through those two strafes.
 
 `Expected = a + (1 − loss) · L+ + 32`
