@@ -103,6 +103,7 @@ new g_TwoKeyPrestrafe[33]
 // Method shown by the real-time HUD, best stats, sonar and landing box:
 // 0 = Predicted (original: stop strafing now), 1 = Expected (strafing goes on as it has so far).
 #define EXP_FLAT_PERIOD 0.07   // seconds before landing with no speed gain assumed
+#define EXP_RAMP_POWER 1.5     // from strafe 4 on, efficiency ramps to 1 as (t/T)^p (strafes 1-3: linear)
 new g_PredMethod[33] = { 1, ... }
 new Float:g_ExpPath[33]        // horizontal path flown since takeoff
 new Float:g_ExpLastPos[33][3]
@@ -169,8 +170,9 @@ stock ExpectedTrack(id, const Float:origin[3], const Float:velocity[3], keys)
 //   eta = a / path flown            (how straight the jump has been)
 // L+  = path still to fly if speed^2 keeps growing at c, except in the last EXP_FLAT_PERIOD
 //       seconds before landing (no gain there: players duck and barely turn).
-// Efficiency ramps from eta now to 1 at landing, so the loss is (1 - eta) times the
-// speed-weighted mean of (1 - t/T) over the remaining time T.
+// Efficiency ramps from eta now to 1 at landing, eta(t) = eta + (1 - eta) (t/T)^p, so the loss is
+// (1 - eta) times the speed-weighted mean of (1 - (t/T)^p) over the remaining time T
+// (p = 1 for strafes 1-3, EXP_RAMP_POWER from strafe 4 on).
 // Expected = a + (1 - loss) * L+ + 32
 stock Float:ExpectedDistance(id, const Float:origin[3], const Float:velocity[3], Float:T)
 {
@@ -195,6 +197,7 @@ stock Float:ExpectedDistance(id, const Float:origin[3], const Float:velocity[3],
     //   eta : thL, thR = largest left / right angle between the velocity and the window's chord;
     //         eta = mean cos of a sweep from -thR to +thL = (sin thL + sin thR) / (thL + thR)
     new n = g_ExpStrafes[id]
+    new Float:rampP = (n >= 4) ? EXP_RAMP_POWER : 1.0
     if (n >= 3)
     {
         new w0 = g_ExpStarts[id][n - 3]
@@ -249,7 +252,7 @@ stock Float:ExpectedDistance(id, const Float:origin[3], const Float:velocity[3],
         {
             new Float:t = (float(j) + 0.5) * h
             new Float:st = floatsqroot(floatmax(s*s + c*floatmin(t, tailA), 1.0))
-            acc += st * (1.0 - t / T)
+            acc += st * (1.0 - floatpower(t / T, rampP))
             wsum += st
         }
         if (wsum > 0.0)
