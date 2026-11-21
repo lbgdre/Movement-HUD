@@ -102,8 +102,8 @@ new g_TwoKeyPrestrafe[33]
 // ===== Expected distance (added in this fork) =====
 // Method shown by the real-time HUD, best stats, sonar and landing box:
 // 0 = Predicted (original: stop strafing now), 1 = Expected (strafing goes on as it has so far).
-#define EXP_FLAT_PERIOD 0.07   // seconds before landing with no speed gain assumed
-#define EXP_RAMP_POWER 1.5     // from strafe 4 on, efficiency ramps to 1 as (t/T)^p (strafes 1-3: linear)
+#define EXP_FLAT_PERIOD 0.0    // seconds before landing with no speed gain assumed
+#define EXP_RAMP_POWER 2.0     // from strafe 4 on, efficiency ramps to 1 as (t/T)^p (strafes 1-3: linear)
 new g_PredMethod[33] = { 1, ... }
 new Float:g_ExpPath[33]        // horizontal path flown since takeoff
 new Float:g_ExpLastPos[33][3]
